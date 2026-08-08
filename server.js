@@ -10,7 +10,8 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://localhost:3000',
-    'https://business360.shop',
+    'https://erp.jayamm.com',
+    'https://web-production-5f5e.up.railway.app',
     /^http:\/\/localhost:\d+$/,
   ],
   credentials: true,
