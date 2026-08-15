@@ -2,7 +2,7 @@ const router = require('express').Router();
 const auth   = require('../middleware/auth');
 const db     = require('../config/db');
 
-router.get('/dashboard', auth, async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
     const branch  = req.query.branch_id || req.user.branch_id;
     const period  = req.query.period || 'month';
