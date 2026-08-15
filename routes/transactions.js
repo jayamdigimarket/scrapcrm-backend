@@ -429,3 +429,52 @@ router.post('/payments', auth, async (req, res) => {
 });
 
 module.exports = router;
+
+// ── SUPPLIER ADVANCES ────────────────────────────────────────────────────────
+
+router.get('/supplier-advances', auth, async (req, res) => {
+  try {
+    const branch = req.query.branch_id || req.user.branch_id;
+    const [rows] = await db.query(`
+      SELECT sa.*, s.name as supplier_name, s.phone
+      FROM supplier_advances sa
+      JOIN suppliers s ON s.id=sa.supplier_id
+      WHERE sa.branch_id=? ORDER BY sa.advance_date DESC`, [branch]);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/supplier-advances', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    const branch = d.branch_id || req.user.branch_id;
+    const [r] = await db.query('INSERT INTO supplier_advances SET ?', [{
+      branch_id: branch,
+      supplier_id: d.supplier_id,
+      amount: d.amount,
+      adjusted_amount: 0,
+      balance_amount: d.amount,
+      payment_mode: d.payment_mode || 'Cash',
+      reference_number: d.reference_number || '',
+      advance_date: d.advance_date,
+      notes: d.notes || '',
+      status: 'Pending',
+      created_by: req.user.id,
+    }]);
+    res.json({ id: r.insertId, message: 'Advance recorded' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /purchases/:id — update balance/status after payment
+router.put('/purchases/:id', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    const updates = {};
+    if (d.balance_due   !== undefined) updates.balance_due   = d.balance_due;
+    if (d.payment_status !== undefined) updates.payment_status = d.payment_status;
+    if (d.amount_paid   !== undefined) updates.amount_paid   = d.amount_paid;
+    if (Object.keys(updates).length > 0)
+      await db.query('UPDATE purchases SET ? WHERE id=?', [updates, req.params.id]);
+    res.json({ message: 'Purchase updated' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
