@@ -52,6 +52,9 @@ router.post('/credit-notes', auth, async (req, res) => {
     const [r] = await conn.query('INSERT INTO credit_notes SET ?', [{
       branch_id: branch, cn_number: cnNo, cn_date: d.cn_date,
       customer_id: d.customer_id, invoice_id: d.invoice_id, reason: d.reason,
+      their_dn_number: d.their_dn_number||'',
+      their_dn_date: d.their_dn_date||null,
+      their_dn_amount: d.their_dn_amount||0,
       subtotal, cgst_amount: cgst, sgst_amount: sgst, igst_amount: igst, total_amount: total,
       status: 'Pending', auto_generated: d.auto_generated||0, created_by: req.user.id,
     }]);
@@ -120,32 +123,65 @@ router.get('/debit-notes', auth, async (req, res) => {
   try {
     const branch = req.query.branch_id || req.user.branch_id;
     const [rows] = await db.query(`
-      SELECT dn.*, s.name as supplier_name, p.purchase_number
+      SELECT dn.*, s.name as supplier_name, s.gst_number as supplier_gst,
+        p.purchase_number
       FROM debit_notes dn
       JOIN suppliers s ON s.id=dn.supplier_id
-      JOIN purchases p ON p.id=dn.purchase_id
+      LEFT JOIN purchases p ON p.id=dn.purchase_id
       WHERE dn.branch_id=? ORDER BY dn.dn_date DESC`, [branch]);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/debit-notes', auth, async (req, res) => {
+  const conn = await db.getConnection();
   try {
+    await conn.beginTransaction();
     const d = req.body;
     const branch = d.branch_id || req.user.branch_id;
     const dnNo = await nextDocNumber(branch, 'DN');
-    const [r] = await db.query('INSERT INTO debit_notes SET ?', [{
+    const total = parseFloat(d.total_amount) || 0;
+    const [r] = await conn.query('INSERT INTO debit_notes SET ?', [{
       branch_id: branch, dn_number: dnNo, dn_date: d.dn_date,
       supplier_id: d.supplier_id, purchase_id: d.purchase_id,
-      reason: d.reason, total_amount: d.total_amount, created_by: req.user.id,
+      reason: d.reason, dn_type: d.dn_type||'quality',
+      total_amount: total, created_by: req.user.id,
     }]);
-    const [pur] = await db.query('SELECT balance_due FROM purchases WHERE id=?', [d.purchase_id]);
-    const newBal = Math.max(0, (parseFloat(pur[0].balance_due)||0) - parseFloat(d.total_amount));
-    await db.query('UPDATE purchases SET balance_due=?,payment_status=? WHERE id=?',
-      [newBal, newBal<=0?'Paid':'Partial', d.purchase_id]);
-    await db.query('UPDATE debit_notes SET status=?,applied_amount=? WHERE id=?', ['Applied', d.total_amount, r.insertId]);
-    res.json({ id: r.insertId, dn_number: dnNo, message: 'Debit note created' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    // Save line items if provided
+    if (d.items && d.items.length > 0) {
+      for (const item of d.items) {
+        if (!item.material_id) continue;
+        await conn.query('INSERT INTO debit_note_items SET ?', [{
+          dn_id: r.insertId,
+          material_id: item.material_id,
+          hsn_code: item.hsn_code||'',
+          quantity: item.quantity||0,
+          rate: item.rate||0,
+          taxable_value: item.taxable_value||0,
+          cgst_rate: item.cgst_rate||0,
+          cgst_amount: item.cgst_amount||0,
+          sgst_rate: item.sgst_rate||0,
+          sgst_amount: item.sgst_amount||0,
+          igst_rate: item.igst_rate||0,
+          igst_amount: item.igst_amount||0,
+          total_value: item.total_value||0,
+        }]);
+      }
+    }
+    // Reduce purchase balance_due by DN amount
+    if (d.purchase_id) {
+      const [pur] = await conn.query('SELECT balance_due, total_amount FROM purchases WHERE id=?', [d.purchase_id]);
+      if (pur.length) {
+        const newBal = Math.max(0, (parseFloat(pur[0].balance_due)||0) - total);
+        await conn.query('UPDATE purchases SET balance_due=?,payment_status=? WHERE id=?',
+          [newBal, newBal<=0?'Paid':'Partial', d.purchase_id]);
+      }
+    }
+    await conn.query('UPDATE debit_notes SET status=?,applied_amount=? WHERE id=?', ['Applied', total, r.insertId]);
+    await conn.commit();
+    res.json({ id: r.insertId, dn_number: dnNo, message: 'Debit note created and applied to purchase' });
+  } catch (e) { await conn.rollback(); res.status(500).json({ error: e.message }); }
+  finally { conn.release(); }
 });
 
 // ── DELIVERY CHALLANS ─────────────────────────────────────

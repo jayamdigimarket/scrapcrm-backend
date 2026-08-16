@@ -478,3 +478,94 @@ router.put('/purchases/:id', auth, async (req, res) => {
     res.json({ message: 'Purchase updated' });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── GRN (GOODS RECEIVED NOTE) ─────────────────────────────────────────────────
+
+router.post('/grn', auth, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const d = req.body;
+    const branch = d.branch_id || req.user.branch_id;
+
+    // Get purchase details
+    const [pur] = await conn.query('SELECT * FROM purchases WHERE id=?', [d.purchase_id]);
+    if (!pur.length) throw new Error('Purchase not found');
+
+    // Save GRN header
+    const [r] = await conn.query('INSERT INTO grn_records SET ?', [{
+      branch_id:       branch,
+      purchase_id:     d.purchase_id,
+      supplier_id:     pur[0].supplier_id,
+      received_date:   d.received_date,
+      vehicle_number:  d.vehicle_number || '',
+      received_by:     d.received_by || '',
+      remarks:         d.remarks || '',
+      status:          'Received',
+      created_by:      req.user.id,
+    }]);
+
+    const grnId = r.insertId;
+
+    // Process each item - update stock
+    for (const item of (d.items || [])) {
+      if (!item.material_id || !item.received_qty) continue;
+
+      // Save GRN item
+      await conn.query('INSERT INTO grn_items SET ?', [{
+        grn_id:       grnId,
+        material_id:  item.material_id,
+        po_qty:       item.quantity || 0,
+        received_qty: item.received_qty,
+        remarks:      item.remarks || '',
+      }]);
+
+      // Update material stock
+      const [mat] = await conn.query('SELECT current_stock FROM materials WHERE id=?', [item.material_id]);
+      if (mat.length) {
+        const newStock = parseFloat(mat[0].current_stock || 0) + parseFloat(item.received_qty || 0);
+        await conn.query('UPDATE materials SET current_stock=? WHERE id=?', [newStock, item.material_id]);
+
+        // Add stock movement
+        await conn.query('INSERT INTO stock_movements SET ?', [{
+          branch_id:       branch,
+          material_id:     item.material_id,
+          movement_type:   'Purchase',
+          reference_type:  'grn',
+          reference_id:    grnId,
+          quantity:        item.received_qty,
+          rate:            item.rate || 0,
+          value:           (item.received_qty * (item.rate || 0)),
+          balance_after:   newStock,
+          movement_date:   d.received_date,
+          notes:           'GRN #' + grnId,
+        }]);
+      }
+    }
+
+    // Mark purchase as received
+    await conn.query('UPDATE purchases SET status=? WHERE id=?', ['Received', d.purchase_id]);
+
+    await conn.commit();
+    res.json({ id: grnId, message: 'GRN saved and stock updated' });
+  } catch(e) {
+    await conn.rollback();
+    res.status(500).json({ error: e.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// GET /purchases/:id - get single purchase with items
+router.get('/purchases/:id', auth, async (req, res) => {
+  try {
+    const [pur] = await db.query('SELECT * FROM purchases WHERE id=?', [req.params.id]);
+    if (!pur.length) return res.status(404).json({ error: 'Not found' });
+    const [items] = await db.query(`
+      SELECT pi.*, m.name as material_name, m.unit, m.hsn_code
+      FROM purchase_items pi
+      JOIN materials m ON m.id=pi.material_id
+      WHERE pi.purchase_id=?`, [req.params.id]);
+    res.json({ ...pur[0], items });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});

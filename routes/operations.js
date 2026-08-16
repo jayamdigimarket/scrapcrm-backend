@@ -278,27 +278,44 @@ router.get('/gst-report', auth, async (req, res) => {
   try {
     const branch = req.query.branch_id || req.user.branch_id;
     const { month, year } = req.query;
+
     const [outward] = await db.query(`
-      SELECT COALESCE(SUM(subtotal),0) as taxable, COALESCE(SUM(cgst_amount),0) as cgst,
-             COALESCE(SUM(sgst_amount),0) as sgst, COALESCE(SUM(igst_amount),0) as igst,
-             COALESCE(SUM(total_amount),0) as total
-      FROM invoices WHERE branch_id=? AND MONTH(invoice_date)=? AND YEAR(invoice_date)=?`,
+      SELECT
+        COALESCE(SUM(i.subtotal),0) as taxable,
+        COALESCE(SUM(i.cgst_amount),0) as cgst,
+        COALESCE(SUM(i.sgst_amount),0) as sgst,
+        COALESCE(SUM(i.igst_amount),0) as igst,
+        COALESCE(SUM(i.total_amount),0) as total,
+        COALESCE(SUM(CASE WHEN c.gst_number IS NOT NULL AND c.gst_number!='' THEN i.subtotal ELSE 0 END),0) as b2b_taxable,
+        COALESCE(SUM(CASE WHEN c.gst_number IS NULL OR c.gst_number='' THEN i.subtotal ELSE 0 END),0) as b2c_taxable
+      FROM invoices i
+      JOIN customers c ON c.id=i.customer_id
+      WHERE i.branch_id=? AND MONTH(i.invoice_date)=? AND YEAR(i.invoice_date)=?`,
       [branch, month, year]);
+
     const [inward] = await db.query(`
-      SELECT COALESCE(SUM(subtotal),0) as taxable, COALESCE(SUM(cgst_amount),0) as cgst,
-             COALESCE(SUM(sgst_amount),0) as sgst, COALESCE(SUM(igst_amount),0) as igst
+      SELECT COALESCE(SUM(cgst_amount),0) as cgst, COALESCE(SUM(sgst_amount),0) as sgst,
+             COALESCE(SUM(igst_amount),0) as igst
       FROM purchases WHERE branch_id=? AND MONTH(purchase_date)=? AND YEAR(purchase_date)=?
       AND supplier_id IN (SELECT id FROM suppliers WHERE gst_registered=1)`,
       [branch, month, year]);
+
     const [invoiceList] = await db.query(`
       SELECT i.invoice_number, i.invoice_date, c.name as customer, c.gst_number, c.state,
         i.subtotal, i.cgst_amount, i.sgst_amount, i.igst_amount, i.total_amount
       FROM invoices i JOIN customers c ON c.id=i.customer_id
       WHERE i.branch_id=? AND MONTH(i.invoice_date)=? AND YEAR(i.invoice_date)=?
       ORDER BY i.invoice_date`, [branch, month, year]);
-    const net_gst = (parseFloat(outward[0].cgst)+parseFloat(outward[0].sgst)+parseFloat(outward[0].igst))
-                  - (parseFloat(inward[0].cgst)+parseFloat(inward[0].sgst)+parseFloat(inward[0].igst));
-    res.json({ outward: outward[0], inward: inward[0], net_gst_payable: net_gst, invoice_list: invoiceList });
+
+    const output_gst = parseFloat(outward[0].cgst||0)+parseFloat(outward[0].sgst||0)+parseFloat(outward[0].igst||0);
+    const input_gst  = parseFloat(inward[0].cgst||0)+parseFloat(inward[0].sgst||0)+parseFloat(inward[0].igst||0);
+
+    res.json({
+      outward: { taxable:parseFloat(outward[0].taxable)||0, b2b_taxable:parseFloat(outward[0].b2b_taxable)||0, b2c_taxable:parseFloat(outward[0].b2c_taxable)||0 },
+      output_gst, output_cgst:parseFloat(outward[0].cgst)||0, output_sgst:parseFloat(outward[0].sgst)||0, output_igst:parseFloat(outward[0].igst)||0,
+      input_gst,  input_cgst:parseFloat(inward[0].cgst)||0,  input_sgst:parseFloat(inward[0].sgst)||0,  input_igst:parseFloat(inward[0].igst)||0,
+      net_gst: Math.max(0, output_gst - input_gst), invoice_list: invoiceList,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

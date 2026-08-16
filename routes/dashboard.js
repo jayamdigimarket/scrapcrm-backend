@@ -44,6 +44,36 @@ router.get('/', auth, async (req, res) => {
     const [[payables]]   = await db.query(`SELECT COALESCE(SUM(balance_due),0) v FROM purchases WHERE branch_id=? AND balance_due>0`, [branch]);
     const [[gstRec]]     = await db.query(`SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) v FROM invoices WHERE branch_id=? AND invoice_date BETWEEN ? AND ?`, [branch,dateFrom,dateTo]);
 
+    // ── Product sales ─────────────────────────────────────────────────────────
+    const [product_sales] = await db.query(`
+      SELECT m.name as material_name,
+        COALESCE(SUM(ii.quantity),0) as total_qty,
+        COALESCE(SUM(ii.taxable_value),0) as total_sales
+      FROM invoice_items ii
+      JOIN materials m ON m.id=ii.material_id
+      JOIN invoices i ON i.id=ii.invoice_id
+      WHERE i.branch_id=? AND i.invoice_date BETWEEN ? AND ?
+      GROUP BY ii.material_id ORDER BY total_sales DESC LIMIT 8`, [branch,dateFrom,dateTo]);
+
+    // ── Product capabilities ───────────────────────────────────────────────────
+    const [cust_caps] = await db.query(`SELECT product_capabilities FROM customers WHERE branch_id=? AND product_capabilities!=''`, [branch]);
+    const [sup_caps]  = await db.query(`SELECT product_capabilities FROM suppliers WHERE branch_id=? AND product_capabilities!=''`, [branch]);
+    const capMap={};
+    cust_caps.forEach(c=>(c.product_capabilities||'').split(',').forEach(p=>{p=p.trim();if(p){if(!capMap[p])capMap[p]={product:p,customers:0,suppliers:0};capMap[p].customers++;}}));
+    sup_caps.forEach(s=>(s.product_capabilities||'').split(',').forEach(p=>{p=p.trim();if(p){if(!capMap[p])capMap[p]={product:p,customers:0,suppliers:0};capMap[p].suppliers++;}}));
+    const product_capabilities=Object.values(capMap).sort((a,b)=>(b.customers+b.suppliers)-(a.customers+a.suppliers)).slice(0,8);
+
+    // ── Party stats ────────────────────────────────────────────────────────────
+    const [[cust_count]] = await db.query(`SELECT COUNT(*) as cnt FROM customers WHERE branch_id=?`, [branch]);
+    const [[sup_count]]  = await db.query(`SELECT COUNT(*) as cnt FROM suppliers WHERE branch_id=?`, [branch]);
+
+    // ── Advances balance ───────────────────────────────────────────────────────
+    const [[advances_bal]] = await db.query(`SELECT COALESCE(SUM(balance_amount),0) as v FROM supplier_advances WHERE branch_id=?`, [branch]);
+
+    // ── Wages weekly/monthly ───────────────────────────────────────────────────
+    const [[wagesWeekly]] = await db.query(`SELECT COALESCE(SUM(wage_amount),0) as v FROM attendance WHERE branch_id=? AND attendance_date>=DATE_SUB(CURDATE(),INTERVAL 7 DAY)`, [branch]);
+    const [[wagesMonthly]] = await db.query(`SELECT COALESCE(SUM(wage_amount),0) as v FROM attendance WHERE branch_id=? AND MONTH(attendance_date)=MONTH(CURDATE()) AND YEAR(attendance_date)=YEAR(CURDATE())`, [branch]);
+
     // ── Recent Invoices ───────────────────────────────────────────────────────
     const [recent_invoices] = await db.query(`
       SELECT i.invoice_number, i.invoice_date, i.total_amount, i.balance_due,
@@ -116,6 +146,7 @@ router.get('/', auth, async (req, res) => {
 
     res.json({
       kpis: {
+        advances_balance: parseFloat(advances_bal.v)||0,
         sales:         parseFloat(sales.v)||0,
         purchases:     parseFloat(purchases.v)||0,
         expenses:      parseFloat(expenses.v)||0,
@@ -135,10 +166,15 @@ router.get('/', auth, async (req, res) => {
         avg_daily:    parseFloat(wagesSummary.avg_daily)||0,
         present_days: parseInt(wagesSummary.present_days)||0,
         absent_days:  parseInt(wagesSummary.absent_days)||0,
+        weekly:       parseFloat(wagesWeekly.v)||0,
+        monthly:      parseFloat(wagesMonthly.v)||0,
       },
       employee_attendance,
       supplier_alerts,
       bank_accounts,
+      product_sales,
+      product_capabilities,
+      party_stats: { customer_count: parseInt(cust_count.cnt)||0, supplier_count: parseInt(sup_count.cnt)||0 },
       period: { from: dateFrom, to: dateTo, period, year, quarter },
     });
   } catch(e) {
