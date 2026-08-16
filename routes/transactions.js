@@ -569,3 +569,19 @@ router.get('/purchases/:id', auth, async (req, res) => {
     res.json({ ...pur[0], items });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── WHATSAPP REMINDER (stub) ──────────────────────────────────────────────────
+router.post('/whatsapp/reminder/:id', auth, async (req, res) => {
+  try {
+    const [inv] = await db.query(`
+      SELECT i.*, c.name as customer_name, c.phone, c.whatsapp
+      FROM invoices i JOIN customers c ON c.id=i.customer_id
+      WHERE i.id=?`, [req.params.id]);
+    if (!inv.length) return res.status(404).json({ error: 'Invoice not found' });
+    const i = inv[0];
+    const phone = (i.whatsapp || i.phone || '').replace(/\D/g, '');
+    const num = phone.startsWith('91') ? phone : '91' + phone;
+    const msg = `Dear ${i.customer_name},\n\nThis is a reminder that Invoice ${i.invoice_number} for ₹${i.balance_due} is pending payment.\n\nPlease arrange payment at the earliest.\n\n— MVR POLYPLAST\nPh: 6305064899`;
+    res.json({ success: true, phone: num, message: msg, whatsapp_url: `https://wa.me/${num}?text=${encodeURIComponent(msg)}` });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
