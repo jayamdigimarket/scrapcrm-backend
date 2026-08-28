@@ -184,47 +184,50 @@ router.get('/suppliers/:id/ledger', auth, async (req, res) => {
     const [supplier] = await db.query('SELECT * FROM suppliers WHERE id=?', [req.params.id]);
     if (!supplier.length) return res.status(404).json({ error: 'Not found' });
 
+    // Purchases (Dr - we owe supplier)
     const [purchases] = await db.query(`
-      SELECT 'Purchase' as type, purchase_number as doc_no, purchase_date as doc_date,
-        0 as debit, total_amount as credit, payment_status as status
+      SELECT 'Purchase' as type, purchase_number as doc_no, purchase_date as date,
+        total_amount as debit, 0 as credit, balance_due, payment_status
       FROM purchases WHERE supplier_id=? ORDER BY purchase_date`, [req.params.id]);
 
+    // Payments (Cr - we paid supplier)
     const [payments] = await db.query(`
-      SELECT 'Payment' as type, payment_number as doc_no, payment_date as doc_date,
-        amount as debit, 0 as credit, 'Paid' as status
-      FROM payments WHERE party_type='supplier' AND party_id=? ORDER BY payment_date`, [req.params.id]);
+      SELECT 'Payment' as type, COALESCE(reference_number,id) as doc_no, payment_date as date,
+        0 as debit, amount as credit, 0 as balance_due, payment_mode as payment_status
+      FROM payments WHERE party_id=? AND party_type='supplier' ORDER BY payment_date`, [req.params.id]);
 
-    const [dns] = await db.query(`
-      SELECT 'Debit Note' as type, dn_number as doc_no, dn_date as doc_date,
-        total_amount as debit, 0 as credit, status
+    // Advances (Cr - advance paid)
+    const [advances] = await db.query(`
+      SELECT 'Advance' as type, COALESCE(reference_number,id) as doc_no, advance_date as date,
+        0 as debit, amount as credit, balance_amount as balance_due, payment_mode as payment_status
+      FROM supplier_advances WHERE supplier_id=? ORDER BY advance_date`, [req.params.id]);
+
+    // Debit Notes (Cr - deducted from payable)
+    const [debits] = await db.query(`
+      SELECT 'Debit Note' as type, dn_number as doc_no, dn_date as date,
+        0 as debit, total_amount as credit, 0 as balance_due, status as payment_status
       FROM debit_notes WHERE supplier_id=? ORDER BY dn_date`, [req.params.id]);
 
-    const allTx = [...purchases, ...payments, ...dns]
-      .sort((a,b) => new Date(a.doc_date) - new Date(b.doc_date));
+    // Combine and sort all transactions
+    const all = [...purchases, ...payments, ...advances, ...debits]
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
 
-    // FIX: parseFloat prevents NaN from string arithmetic
+    // Calculate running balance
     let balance = parseFloat(supplier[0].opening_balance) || 0;
-    const ledger = allTx.map(tx => {
-      const debit  = parseFloat(tx.debit)  || 0;
-      const credit = parseFloat(tx.credit) || 0;
-      balance = balance + credit - debit;
-      return {
-        ...tx,
-        debit:   debit,
-        credit:  credit,
-        balance: parseFloat(balance.toFixed(2)),
-      };
+    const transactions = all.map(t => {
+      balance += (parseFloat(t.debit)||0) - (parseFloat(t.credit)||0);
+      return { ...t, balance: balance.toFixed(2) };
     });
 
     res.json({
       supplier: supplier[0],
-      ledger,
-      closing_balance: parseFloat(balance.toFixed(2)),
+      transactions,
+      opening_balance: supplier[0].opening_balance || 0,
+      closing_balance: balance,
     });
-  } catch (e) {
-    console.error('Supplier ledger error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+
 
 module.exports = router;

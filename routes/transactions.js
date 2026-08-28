@@ -145,7 +145,10 @@ router.get('/purchases', auth, async (req, res) => {
   try {
     const branch = req.query.branch_id || req.user.branch_id;
     const [rows] = await db.query(`
-      SELECT p.*, s.name as supplier_name, s.gst_registered, s.supplier_type
+      SELECT p.*, s.name as supplier_name, s.gst_registered, s.supplier_type,
+        s.phone as supplier_phone, s.gst_number as supplier_gst,
+        COALESCE((SELECT SUM(dn.total_amount) FROM debit_notes dn WHERE dn.purchase_id=p.id AND dn.status='Applied'),0) as dn_total,
+        COALESCE((SELECT SUM(pay.amount) FROM payments pay WHERE pay.purchase_id=p.id),0) as amount_paid_actual
       FROM purchases p JOIN suppliers s ON s.id=p.supplier_id
       WHERE p.branch_id=? ORDER BY p.purchase_date DESC`, [branch]);
     res.json(rows);
@@ -251,11 +254,41 @@ router.post('/purchases', auth, async (req, res) => {
       autoPoId = po.insertId;
     }
 
+    // ── Auto-deduct supplier advances ────────────────────────────────────────
+    const purId = r.insertId;
+    const [advRows] = await conn.query(
+      `SELECT * FROM supplier_advances WHERE supplier_id=? AND branch_id=? AND balance_amount>0 ORDER BY advance_date ASC`,
+      [d.supplier_id, branch]);
+
+    let remainingBal = total || 0; // Use calculated total from items
+    let totalAdvUsed = 0;
+
+    for (const adv of advRows) {
+      if (remainingBal <= 0) break;
+      const useAmt = Math.min(parseFloat(adv.balance_amount), remainingBal);
+      const newAdj = parseFloat(adv.adjusted_amount||0) + useAmt;
+      const newBal = parseFloat(adv.balance_amount) - useAmt;
+      await conn.query(
+        `UPDATE supplier_advances SET adjusted_amount=?, balance_amount=?, status=?, purchase_id=? WHERE id=?`,
+        [newAdj, newBal, newBal<=0?'Adjusted':'Partial', purId, adv.id]);
+      remainingBal -= useAmt;
+      totalAdvUsed += useAmt;
+    }
+
+    // Update purchase balance after advance deduction
+    if (totalAdvUsed > 0) {
+      await conn.query(
+        `UPDATE purchases SET balance_due=?, amount_paid=?, payment_status=? WHERE id=?`,
+        [remainingBal, totalAdvUsed, remainingBal<=0?'Paid':'Partial', purId]);
+    }
+
     await conn.commit();
     res.json({
-      id: r.insertId, purchase_number: purNo,
+      id: purId, purchase_number: purNo,
+      advance_used: totalAdvUsed,
+      balance_due: remainingBal,
       auto_po_created: !isGST, auto_po_id: autoPoId,
-      message: 'Purchase recorded',
+      message: 'Purchase recorded' + (totalAdvUsed>0?` — Advance ₹${totalAdvUsed.toFixed(2)} auto-deducted`:''),
     });
   } catch (e) {
     await conn.rollback();
@@ -428,8 +461,6 @@ router.post('/payments', auth, async (req, res) => {
   } finally { conn.release(); }
 });
 
-module.exports = router;
-
 // ── SUPPLIER ADVANCES ────────────────────────────────────────────────────────
 
 router.get('/supplier-advances', auth, async (req, res) => {
@@ -599,3 +630,153 @@ Ph: 6305064899`;
     res.json({ success: true, phone: num, outstanding: total, message: msg, whatsapp_url: `https://wa.me/${num}?text=${encodeURIComponent(msg)}` });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── CUSTOMER ADVANCES ─────────────────────────────────────────────────────────
+
+router.get('/customer-advances', auth, async (req, res) => {
+  try {
+    const branch = req.query.branch_id || req.user.branch_id;
+    const [rows] = await db.query(`
+      SELECT ca.*, c.name as customer_name, c.phone
+      FROM customer_advances ca
+      JOIN customers c ON c.id=ca.customer_id
+      WHERE ca.branch_id=? ORDER BY ca.advance_date DESC`, [branch]);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/customer-advances', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    const branch = d.branch_id || req.user.branch_id;
+    const [r] = await db.query('INSERT INTO customer_advances SET ?', [{
+      branch_id:        branch,
+      customer_id:      d.customer_id,
+      amount:           d.amount,
+      adjusted_amount:  0,
+      balance_amount:   d.amount,
+      payment_mode:     d.payment_mode || 'Cash',
+      reference_number: d.reference_number || '',
+      advance_date:     d.advance_date,
+      notes:            d.notes || '',
+      status:           'Pending',
+      created_by:       req.user.id,
+    }]);
+    res.json({ id: r.insertId, message: 'Customer advance recorded' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CUSTOMER POs ──────────────────────────────────────────────────────────────
+
+router.get('/customer-pos', auth, async (req, res) => {
+  try {
+    const branch = req.query.branch_id || req.user.branch_id;
+    const [rows] = await db.query(`
+      SELECT cp.*, c.name as customer_name, c.gst_number
+      FROM customer_pos cp
+      JOIN customers c ON c.id=cp.customer_id
+      WHERE cp.branch_id=? ORDER BY cp.po_date DESC`, [branch]);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/customer-pos', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    const branch = d.branch_id || req.user.branch_id;
+    const [r] = await db.query('INSERT INTO customer_pos SET ?', [{
+      branch_id:      branch,
+      customer_id:    d.customer_id,
+      po_number:      d.po_number,
+      po_date:        d.po_date,
+      delivery_date:  d.delivery_date || null,
+      payment_terms:  d.payment_terms || '30 days',
+      total_amount:   d.total_amount || 0,
+      notes:          d.notes || '',
+      status:         'Pending',
+      created_by:     req.user.id,
+    }]);
+    // Save items
+    if (d.items && d.items.length) {
+      for (const it of d.items) {
+        if (!it.material_id) continue;
+        await db.query('INSERT INTO customer_po_items SET ?', [{
+          po_id: r.insertId, material_id: it.material_id,
+          hsn_code: it.hsn_code||'', quantity: it.quantity||0,
+          unit: it.unit||'Kg', rate: it.rate||0,
+          taxable_value: it.taxable_value||0, total_value: it.total_value||0,
+        }]);
+      }
+    }
+    res.json({ id: r.insertId, message: 'Customer PO recorded' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/customer-pos/:id', auth, async (req, res) => {
+  try {
+    await db.query('DELETE FROM customer_po_items WHERE po_id=?', [req.params.id]);
+    await db.query('DELETE FROM customer_pos WHERE id=?', [req.params.id]);
+    res.json({ message: 'Deleted' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── INDENTS ───────────────────────────────────────────────────────────────────
+
+router.get('/indents', auth, async (req, res) => {
+  try {
+    const branch = req.query.branch_id || req.user.branch_id;
+    const [rows] = await db.query(`
+      SELECT ind.*, c.name as customer_name
+      FROM indents ind
+      JOIN customers c ON c.id=ind.customer_id
+      WHERE ind.branch_id=? ORDER BY ind.indent_date DESC`, [branch]);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/indents', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    const branch = d.branch_id || req.user.branch_id;
+    // Get next indent number
+    const [[last]] = await db.query(
+      `SELECT MAX(CAST(SUBSTRING_INDEX(indent_number,'/',-2) AS UNSIGNED)) as last FROM indents WHERE branch_id=?`, [branch]);
+    const nextNum = (last.last || 0) + 1;
+    const fy = new Date().getFullYear().toString().slice(-2) + '-' + (new Date().getFullYear()+1).toString().slice(-2);
+    const indentNo = `IND/${String(nextNum).padStart(3,'0')}/${fy}`;
+
+    const [r] = await db.query('INSERT INTO indents SET ?', [{
+      branch_id:          branch,
+      indent_number:      indentNo,
+      customer_id:        d.customer_id,
+      customer_po_id:     d.customer_po_id || null,
+      customer_po_number: d.customer_po_number || '',
+      indent_date:        d.indent_date,
+      required_date:      d.required_date || null,
+      notes:              d.notes || '',
+      status:             'Open',
+      created_by:         req.user.id,
+    }]);
+    // Save items
+    if (d.items && d.items.length) {
+      for (const it of d.items) {
+        if (!it.material_id) continue;
+        await db.query('INSERT INTO indent_items SET ?', [{
+          indent_id: r.insertId, material_id: it.material_id,
+          hsn_code: it.hsn_code||'', quantity: it.quantity||0,
+          unit: it.unit||'Kg', rate: it.rate||0,
+        }]);
+      }
+    }
+    res.json({ id: r.insertId, indent_number: indentNo, message: 'Indent created' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/indents/:id', auth, async (req, res) => {
+  try {
+    await db.query('UPDATE indents SET ? WHERE id=?', [req.body, req.params.id]);
+    res.json({ message: 'Updated' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+module.exports = router;

@@ -153,6 +153,23 @@ router.delete('/production/:id', auth, async (req, res) => {
 
 // ── ATTENDANCE ───────────────────────────────────────────────────────────────
 
+// Monthly attendance summary
+router.get('/attendance/monthly', auth, async (req, res) => {
+  try {
+    const branch = req.query.branch_id || req.user.branch_id;
+    const month = req.query.month || new Date().getMonth() + 1;
+    const year  = req.query.year  || new Date().getFullYear();
+    const [rows] = await db.query(`
+      SELECT a.*, e.name as employee_name, e.designation,
+        e.daily_wage, e.weekly_wage, e.monthly_wage, e.wage_type
+      FROM attendance a
+      JOIN employees e ON e.id=a.employee_id
+      WHERE a.branch_id=? AND MONTH(a.attendance_date)=? AND YEAR(a.attendance_date)=?
+      ORDER BY e.name, a.attendance_date`, [branch, month, year]);
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/employees', auth, async (req, res) => {
   try {
     const branch = req.query.branch_id || req.user.branch_id;
@@ -222,11 +239,11 @@ router.post('/attendance/bulk', auth, async (req, res) => {
     const { date, records, branch_id } = req.body;
     const branch = branch_id || req.user.branch_id;
     for (const rec of records) {
-      await db.query(`INSERT INTO attendance (branch_id,employee_id,attendance_date,status,in_time,out_time,wage_amount,created_by)
-        VALUES (?,?,?,?,?,?,?,?)
-        ON DUPLICATE KEY UPDATE status=?,in_time=?,out_time=?,wage_amount=?`,
-        [branch,rec.employee_id,date,rec.status,rec.in_time,rec.out_time,rec.wage_amount,req.user.id,
-         rec.status,rec.in_time,rec.out_time,rec.wage_amount]);
+      await db.query(`INSERT INTO attendance (branch_id,employee_id,attendance_date,status,in_time,out_time,wage_amount,target_achieved,target_description,notes,created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE status=?,in_time=?,out_time=?,wage_amount=?,target_achieved=?,target_description=?,notes=?`,
+        [branch,rec.employee_id,date,rec.status,rec.in_time||null,rec.out_time||null,rec.wage_amount,rec.target_achieved?1:0,rec.target||"",rec.notes||"",req.user.id,
+         rec.status,rec.in_time||null,rec.out_time||null,rec.wage_amount,rec.target_achieved?1:0,rec.target||"",rec.notes||""]);
     }
     res.json({ message: 'Attendance saved' });
   } catch (e) { res.status(500).json({ error: e.message }); }
