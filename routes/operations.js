@@ -18,10 +18,11 @@ router.post('/materials', auth, async (req, res) => {
     const d = req.body;
     const [r] = await db.query('INSERT INTO materials SET ?', [{
       branch_id: d.branch_id || req.user.branch_id,
-      name: d.name, hsn_code: d.hsn_code, unit: d.unit||'Kg',
+      name: d.name, category: d.category||'General',
+      hsn_code: d.hsn_code, unit: d.unit||'Kg',
       purchase_rate: d.purchase_rate||0, sale_rate: d.sale_rate||0,
       gst_rate: d.gst_rate||18, current_stock: d.current_stock||0,
-      min_stock: d.min_stock||0,
+      min_stock: d.min_stock||0, description: d.description||null,
     }]);
     res.json({ id: r.insertId, message: 'Material created' });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -31,8 +32,8 @@ router.put('/materials/:id', auth, async (req, res) => {
   try {
     const d = req.body;
     await db.query(
-      'UPDATE materials SET name=?,hsn_code=?,unit=?,purchase_rate=?,sale_rate=?,gst_rate=?,min_stock=?,current_stock=? WHERE id=?',
-      [d.name,d.hsn_code,d.unit||'Kg',d.purchase_rate,d.sale_rate,d.gst_rate,d.min_stock,d.current_stock,req.params.id]);
+      'UPDATE materials SET name=?,category=?,hsn_code=?,unit=?,purchase_rate=?,sale_rate=?,gst_rate=?,min_stock=?,current_stock=?,description=? WHERE id=?',
+      [d.name,d.category||'General',d.hsn_code,d.unit||'Kg',d.purchase_rate,d.sale_rate,d.gst_rate,d.min_stock,d.current_stock,d.description||null,req.params.id]);
     const status = +d.current_stock<=0?'Critical':+d.current_stock<=+d.min_stock?'Low':'Good';
     await db.query('UPDATE materials SET status=? WHERE id=?', [status, req.params.id]);
     res.json({ message: 'Material updated' });

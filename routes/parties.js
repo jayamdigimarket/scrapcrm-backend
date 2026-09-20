@@ -42,7 +42,7 @@ router.post('/customers', auth, async (req, res) => {
       product_capabilities: d.product_capabilities || '',
       opening_balance: d.opening_balance || 0,
       balance_type: d.balance_type || 'debit',
-      payment_terms: d.payment_terms || 7,
+      payment_terms: d.payment_terms || '',
       credit_limit: d.credit_limit || 0, notes: d.notes,
     }]);
     res.json({ id: r.insertId, message: 'Customer created' });
@@ -53,7 +53,7 @@ router.put('/customers/:id', auth, async (req, res) => {
   try {
     const d = req.body;
     await db.query(`UPDATE customers SET name=?,business_name=?,gst_number=?,pan_number=?,phone=?,email=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,credit_limit=?,notes=? WHERE id=?`,
-      [d.name,d.business_name,d.gst_number,d.pan_number,d.phone,d.email,d.billing_address,d.shipping_address,d.city,d.state,d.pincode,d.payment_terms,d.credit_limit,d.notes,req.params.id]);
+      [d.name,d.business_name,d.gst_number,d.pan_number,d.phone,d.email,d.billing_address,d.shipping_address,d.city,d.state,d.pincode,d.payment_terms||'',d.credit_limit||0,d.notes||'',req.params.id]);
     res.json({ message: 'Updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -156,14 +156,20 @@ router.post('/suppliers', auth, async (req, res) => {
       name: d.name, business_name: d.business_name,
       supplier_type: d.supplier_type || 'Other',
       gst_registered: d.gst_registered ? 1 : 0,
-      gst_number: d.gst_number, pan_number: d.pan_number,
+      gst_number: d.gst_number || '', pan_number: d.pan_number || '',
       phone: d.phone, whatsapp: d.whatsapp||d.phone||'',
-      email: d.email, address: d.billing_address||d.address,
+      email: d.email || '',
       contact_name: d.contact_name||'',
+      address: d.billing_address||d.address||'',
+      billing_address: d.billing_address||d.address||'',
+      shipping_address: d.shipping_address||'',
       product_capabilities: d.product_capabilities||'',
-      city: d.city, state: d.state, pincode: d.pincode,
+      city: d.city||'', state: d.state||'', pincode: d.pincode||'',
       opening_balance: d.opening_balance || 0,
-      payment_terms: d.payment_terms || 7, notes: d.notes,
+      payment_terms: d.payment_terms || '',
+      bank_name: d.bank_name||'', bank_account: d.bank_account||'',
+      ifsc_code: d.ifsc_code||'', bank_branch: d.bank_branch||'',
+      notes: d.notes||'',
     }]);
     res.json({ id: r.insertId, message: 'Supplier created' });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -172,8 +178,8 @@ router.post('/suppliers', auth, async (req, res) => {
 router.put('/suppliers/:id', auth, async (req, res) => {
   try {
     const d = req.body;
-    await db.query(`UPDATE suppliers SET name=?,business_name=?,supplier_type=?,gst_registered=?,gst_number=?,phone=?,email=?,address=?,city=?,state=?,payment_terms=?,notes=? WHERE id=?`,
-      [d.name,d.business_name,d.supplier_type,d.gst_registered?1:0,d.gst_number,d.phone,d.email,d.address,d.city,d.state,d.payment_terms,d.notes,req.params.id]);
+    await db.query(`UPDATE suppliers SET name=?,business_name=?,supplier_type=?,gst_registered=?,gst_number=?,phone=?,whatsapp=?,email=?,contact_name=?,address=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,bank_name=?,bank_account=?,ifsc_code=?,bank_branch=?,notes=? WHERE id=?`,
+      [d.name,d.business_name,d.supplier_type||'Other',d.gst_registered?1:0,d.gst_number||'',d.phone,d.whatsapp||d.phone||'',d.email||'',d.contact_name||'',d.billing_address||d.address||'',d.billing_address||d.address||'',d.shipping_address||'',d.city||'',d.state||'',d.pincode||'',d.payment_terms||'',d.bank_name||'',d.bank_account||'',d.ifsc_code||'',d.bank_branch||'',d.notes||'',req.params.id]);
     res.json({ message: 'Updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
