@@ -74,13 +74,13 @@ router.get('/', auth, async (req, res) => {
     const [[wagesWeekly]] = await db.query(`SELECT COALESCE(SUM(wage_amount),0) as v FROM attendance WHERE branch_id=? AND attendance_date>=DATE_SUB(CURDATE(),INTERVAL 7 DAY)`, [branch]);
     const [[wagesMonthly]] = await db.query(`SELECT COALESCE(SUM(wage_amount),0) as v FROM attendance WHERE branch_id=? AND MONTH(attendance_date)=MONTH(CURDATE()) AND YEAR(attendance_date)=YEAR(CURDATE())`, [branch]);
 
-    // ── Recent Invoices ───────────────────────────────────────────────────────
+    // ── Recent Invoices ── always show latest regardless of period ──────────
     const [recent_invoices] = await db.query(`
       SELECT i.invoice_number, i.invoice_date, i.total_amount, i.balance_due,
         i.payment_status, c.name as customer
       FROM invoices i JOIN customers c ON c.id=i.customer_id
-      WHERE i.branch_id=? AND i.invoice_date BETWEEN ? AND ?
-      ORDER BY i.invoice_date DESC, i.id DESC LIMIT 10`, [branch,dateFrom,dateTo]);
+      WHERE i.branch_id=?
+      ORDER BY i.invoice_date DESC, i.id DESC LIMIT 10`, [branch]);
 
     // ── Recent POs ────────────────────────────────────────────────────────────
     const [recent_pos] = await db.query(`

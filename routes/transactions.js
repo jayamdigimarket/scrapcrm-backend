@@ -71,8 +71,11 @@ router.post('/invoices', auth, async (req, res) => {
       igst     += +item.igst_amount  || 0;
     });
     const total = subtotal + cgst + sgst + igst;
+    // Extract numeric days from text payment_terms (e.g. "7 days from invoice" -> 7)
+    const ptText = String(d.payment_terms || '30');
+    const ptDays = parseInt(ptText.match(/\d+/)?.[0] || '30');
     const dueDate = new Date(d.invoice_date);
-    dueDate.setDate(dueDate.getDate() + (d.payment_terms || 7));
+    dueDate.setDate(dueDate.getDate() + ptDays);
 
     const [r] = await conn.query(`INSERT INTO invoices SET ?`, [{
       branch_id: branch, invoice_number: invNo,
@@ -84,7 +87,7 @@ router.post('/invoices', auth, async (req, res) => {
       subtotal, cgst_amount: cgst, sgst_amount: sgst, igst_amount: igst,
       total_amount: total, amount_in_words: amountToWords(total),
       balance_due: total, payment_status: 'Unpaid',
-      payment_terms: d.payment_terms || 7, due_date: dueDate,
+      payment_terms: ptText, due_date: dueDate,
       notes: d.notes, created_by: req.user.id,
     }]);
 

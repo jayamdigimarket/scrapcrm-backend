@@ -498,4 +498,95 @@ router.post('/import/:type', auth, upload.single('file'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── RECALCULATE STOCK ────────────────────────────────────────────────────────
+router.post('/recalculate-stock', auth, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const branch = req.body.branch_id || req.user.branch_id;
+
+    // Get all active materials for this branch
+    const [mats] = await conn.query('SELECT id FROM materials WHERE branch_id=? AND is_active=1', [branch]);
+
+    for (const mat of mats) {
+      // Sum all purchases
+      const [[purSum]] = await conn.query(
+        `SELECT COALESCE(SUM(pi.quantity),0) as total
+         FROM purchase_items pi
+         JOIN purchases p ON p.id=pi.purchase_id
+         WHERE pi.material_id=? AND p.branch_id=?`,
+        [mat.id, branch]);
+
+      // Sum all sales/invoices
+      const [[saleSum]] = await conn.query(
+        `SELECT COALESCE(SUM(ii.quantity),0) as total
+         FROM invoice_items ii
+         JOIN invoices i ON i.id=ii.invoice_id
+         WHERE ii.material_id=? AND i.branch_id=?`,
+        [mat.id, branch]);
+
+      // Sum credit note returns (goods came back)
+      const [[cnSum]] = await conn.query(
+        `SELECT COALESCE(SUM(ci.quantity),0) as total
+         FROM credit_note_items ci
+         JOIN credit_notes cn ON cn.id=ci.credit_note_id
+         WHERE ci.material_id=? AND cn.branch_id=?`,
+        [mat.id, branch]).catch(() => [[{total:0}]]);
+
+      const newStock = parseFloat(purSum.total) - parseFloat(saleSum.total) + parseFloat(cnSum.total||0);
+
+      await conn.query('UPDATE materials SET current_stock=? WHERE id=?', [newStock, mat.id]);
+    }
+
+    // Rebuild stock_movements with correct balance_after
+    // Delete old movements
+    await conn.query('DELETE FROM stock_movements WHERE branch_id=?', [branch]);
+
+    // Re-insert purchase movements
+    const [purMoves] = await conn.query(
+      `SELECT p.branch_id, pi.material_id, pi.quantity, pi.rate, pi.total_value, p.purchase_date, p.id as ref_id
+       FROM purchase_items pi JOIN purchases p ON p.id=pi.purchase_id
+       WHERE p.branch_id=? ORDER BY p.purchase_date ASC, p.id ASC`, [branch]);
+
+    // Re-insert sale movements
+    const [saleMoves] = await conn.query(
+      `SELECT i.branch_id, ii.material_id, ii.quantity, ii.rate, ii.total_value, i.invoice_date as purchase_date, i.id as ref_id
+       FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id
+       WHERE i.branch_id=? ORDER BY i.invoice_date ASC, i.id ASC`, [branch]);
+
+    // Combine and sort by date
+    const allMoves = [
+      ...purMoves.map(m=>({...m, type:'Purchase', qty: +m.quantity})),
+      ...saleMoves.map(m=>({...m, type:'Sale', qty: -m.quantity})),
+    ].sort((a,b) => new Date(a.purchase_date) - new Date(b.purchase_date));
+
+    // Calculate running balance per material
+    const balances = {};
+    for (const mv of allMoves) {
+      if (!balances[mv.material_id]) balances[mv.material_id] = 0;
+      balances[mv.material_id] += mv.qty;
+      await conn.query('INSERT INTO stock_movements SET ?', [{
+        branch_id: branch,
+        material_id: mv.material_id,
+        movement_type: mv.type,
+        reference_type: mv.type==='Purchase'?'purchase':'invoice',
+        reference_id: mv.ref_id,
+        quantity: mv.qty,
+        rate: mv.rate,
+        value: mv.total_value,
+        balance_after: balances[mv.material_id],
+        movement_date: mv.purchase_date,
+      }]);
+    }
+
+    await conn.commit();
+    res.json({ message: `Stock recalculated for ${mats.length} materials. Movements rebuilt.` });
+  } catch(e) {
+    await conn.rollback();
+    res.status(500).json({ error: e.message });
+  } finally {
+    conn.release();
+  }
+});
+
 module.exports = router;
