@@ -8,7 +8,17 @@ const bcrypt = require('bcryptjs');
 router.get('/materials', auth, async (req, res) => {
   try {
     const branch = req.query.branch_id || req.user.branch_id;
-    const [rows] = await db.query('SELECT * FROM materials WHERE branch_id=? AND is_active=1 ORDER BY name', [branch]);
+    const [rows] = await db.query(`
+      SELECT m.*,
+        COALESCE(
+          (SELECT SUM(pi.taxable_value) / NULLIF(SUM(pi.quantity),0)
+           FROM purchase_items pi
+           JOIN purchases p ON p.id=pi.purchase_id
+           WHERE pi.material_id=m.id AND p.branch_id=?),
+          m.purchase_rate
+        ) as avg_purchase_price
+      FROM materials m
+      WHERE m.branch_id=? AND m.is_active=1 ORDER BY m.name`, [branch, branch]);
     res.json(rows.map(s => ({...s, status: s.current_stock<=0?'Critical':s.current_stock<=s.min_stock?'Low':'Good'})));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
