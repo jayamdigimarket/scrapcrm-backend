@@ -91,9 +91,16 @@ router.get('/', auth, async (req, res) => {
 
     // ── Stock Summary ─────────────────────────────────────────────────────────
     const [stock_summary] = await db.query(`
-      SELECT name, current_stock, min_stock, unit,
-        CASE WHEN current_stock<=0 THEN 'Critical' WHEN current_stock<=min_stock THEN 'Low' ELSE 'Good' END as status
-      FROM materials WHERE branch_id=? AND is_active=1 ORDER BY current_stock ASC`, [branch]);
+      SELECT m.name, m.current_stock, m.min_stock, m.unit, m.purchase_rate,
+        CASE WHEN m.current_stock<=0 THEN 'Critical' WHEN m.current_stock<=m.min_stock THEN 'Low' ELSE 'Good' END as status,
+        COALESCE(
+          (SELECT SUM(pi.taxable_value) / NULLIF(SUM(pi.quantity),0)
+           FROM purchase_items pi
+           JOIN purchases p ON p.id=pi.purchase_id
+           WHERE pi.material_id=m.id AND p.branch_id=?),
+          m.purchase_rate
+        ) as avg_purchase_price
+      FROM materials m WHERE m.branch_id=? AND m.is_active=1 ORDER BY m.current_stock ASC`, [branch, branch]);
 
     // ── Production Summary ────────────────────────────────────────────────────
     const [production_summary] = await db.query(`
