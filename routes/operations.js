@@ -44,8 +44,6 @@ router.put('/materials/:id', auth, async (req, res) => {
     await db.query(
       'UPDATE materials SET name=?,category=?,hsn_code=?,unit=?,purchase_rate=?,sale_rate=?,gst_rate=?,min_stock=?,current_stock=?,description=? WHERE id=?',
       [d.name,d.category||'General',d.hsn_code,d.unit||'Kg',d.purchase_rate,d.sale_rate,d.gst_rate,d.min_stock,d.current_stock,d.description||null,req.params.id]);
-    const status = +d.current_stock<=0?'Critical':+d.current_stock<=+d.min_stock?'Low':'Good';
-    await db.query('UPDATE materials SET status=? WHERE id=?', [status, req.params.id]);
     res.json({ message: 'Material updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
