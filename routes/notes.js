@@ -184,6 +184,27 @@ router.post('/debit-notes', auth, async (req, res) => {
   finally { conn.release(); }
 });
 
+// GET single debit note with items
+router.get('/debit-notes/:id', auth, async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT dn.*, s.name as supplier_name, s.gst_number as supplier_gst,
+        s.phone as supplier_phone, s.address as supplier_address,
+        p.purchase_number
+      FROM debit_notes dn
+      JOIN suppliers s ON s.id=dn.supplier_id
+      LEFT JOIN purchases p ON p.id=dn.purchase_id
+      WHERE dn.id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    const [items] = await db.query(`
+      SELECT dni.*, m.name as material_name, m.hsn_code as mat_hsn
+      FROM debit_note_items dni
+      LEFT JOIN materials m ON m.id=dni.material_id
+      WHERE dni.dn_id=?`, [req.params.id]);
+    res.json({ ...rows[0], items });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── DELIVERY CHALLANS ─────────────────────────────────────
 
 router.get('/delivery-challans', auth, async (req, res) => {
