@@ -715,6 +715,16 @@ router.post('/customer-pos', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+router.put('/customer-pos/:id', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    await db.query(
+      'UPDATE customer_pos SET status=?,delivery_date=?,payment_terms=?,notes=? WHERE id=?',
+      [d.status||'Pending', d.delivery_date||null, d.payment_terms||'', d.notes||'', req.params.id]);
+    res.json({ message: 'Updated' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 router.delete('/customer-pos/:id', auth, async (req, res) => {
   try {
     await db.query('DELETE FROM customer_po_items WHERE po_id=?', [req.params.id]);
