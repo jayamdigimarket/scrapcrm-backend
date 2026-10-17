@@ -42,7 +42,10 @@ router.get('/', auth, async (req, res) => {
     const [[wages]]      = await db.query(`SELECT COALESCE(SUM(wage_amount),0) v FROM attendance WHERE branch_id=? AND attendance_date BETWEEN ? AND ?`, [branch,dateFrom,dateTo]);
     const [[receivables]]= await db.query(`SELECT COALESCE(SUM(balance_due),0) v FROM invoices WHERE branch_id=? AND balance_due>0`, [branch]);
     const [[payables]]   = await db.query(`SELECT COALESCE(SUM(balance_due),0) v FROM purchases WHERE branch_id=? AND balance_due>0`, [branch]);
-    const [[gstRec]]     = await db.query(`SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) v FROM invoices WHERE branch_id=? AND invoice_date BETWEEN ? AND ?`, [branch,dateFrom,dateTo]);
+    // GST Receivable = GST on unpaid/partially paid invoices only (balance_due > 0)
+    const [[gstRec]]     = await db.query(`SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) v FROM invoices WHERE branch_id=? AND balance_due>0`, [branch]);
+    // GST Payable = GST paid on purchases (input tax / what we owe to govt net)
+    const [[gstPay]]     = await db.query(`SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) v FROM purchases WHERE branch_id=? AND purchase_date BETWEEN ? AND ?`, [branch,dateFrom,dateTo]);
 
     // ── Product sales ─────────────────────────────────────────────────────────
     const [product_sales] = await db.query(`
@@ -162,6 +165,7 @@ router.get('/', auth, async (req, res) => {
         receivables:   parseFloat(receivables.v)||0,
         payables:      parseFloat(payables.v)||0,
         gst_receivable:parseFloat(gstRec.v)||0,
+        gst_payable:   parseFloat(gstPay.v)||0,
         bank_balance:  bank_accounts.reduce((s,b)=>s+(parseFloat(b.current_balance)||0), 0),
       },
       recent_invoices,
