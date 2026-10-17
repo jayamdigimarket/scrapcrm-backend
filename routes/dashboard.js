@@ -42,8 +42,8 @@ router.get('/', auth, async (req, res) => {
     const [[wages]]      = await db.query(`SELECT COALESCE(SUM(wage_amount),0) v FROM attendance WHERE branch_id=? AND attendance_date BETWEEN ? AND ?`, [branch,dateFrom,dateTo]);
     const [[receivables]]= await db.query(`SELECT COALESCE(SUM(balance_due),0) v FROM invoices WHERE branch_id=? AND balance_due>0`, [branch]);
     const [[payables]]   = await db.query(`SELECT COALESCE(SUM(balance_due),0) v FROM purchases WHERE branch_id=? AND balance_due>0`, [branch]);
-    // GST Receivable = GST on unpaid/partially paid invoices only (balance_due > 0)
-    const [[gstRec]]     = await db.query(`SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) v FROM invoices WHERE branch_id=? AND balance_due>0`, [branch]);
+    // GST Receivable = Total GST collected from customers in the period (for GST filing)
+    const [[gstRec]]     = await db.query(`SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) v FROM invoices WHERE branch_id=? AND invoice_date BETWEEN ? AND ?`, [branch,dateFrom,dateTo]);
     // GST Payable = GST paid on purchases (input tax / what we owe to govt net)
     const [[gstPay]]     = await db.query(`SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) v FROM purchases WHERE branch_id=? AND purchase_date BETWEEN ? AND ?`, [branch,dateFrom,dateTo]);
 
