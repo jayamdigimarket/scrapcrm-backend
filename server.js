@@ -12,6 +12,7 @@ app.use(cors({
     'http://localhost:3000',
     'https://erp.jayamm.com',
     'https://web-production-5f5e.up.railway.app',
+    'https://erp.mvrpolyplast.com',
     /^http:\/\/localhost:\d+$/,
   ],
   credentials: true,
