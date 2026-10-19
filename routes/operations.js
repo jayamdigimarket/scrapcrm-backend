@@ -423,6 +423,17 @@ router.put('/users/:id', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.delete('/users/:id', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+    const [target] = await db.query('SELECT role FROM users WHERE id=?', [req.params.id]);
+    if (!target.length) return res.status(404).json({ error: 'User not found' });
+    if (target[0].role === 'superadmin') return res.status(403).json({ error: 'Cannot delete superadmin user' });
+    await db.query('DELETE FROM users WHERE id=?', [req.params.id]);
+    res.json({ message: 'User deleted' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SETTINGS ─────────────────────────────────────────────────────────────────
 
 router.get('/settings', auth, async (req, res) => {
