@@ -13,7 +13,13 @@ app.use(cors({
     'https://erp.jayamm.com',
     'https://web-production-5f5e.up.railway.app',
     'https://erp.mvrpolyplast.com',
+    // Android Capacitor APK origins
+    'capacitor://localhost',
+    'https://localhost',
+    'http://localhost',
+    'ionic://localhost',
     /^http:\/\/localhost:\d+$/,
+    /^capacitor:\/\//,
   ],
   credentials: true,
 }));
