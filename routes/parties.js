@@ -120,7 +120,10 @@ router.get('/customers/:id/ledger', auth, async (req, res) => {
     // Payments/Credit Notes = Cr (customer paid / reduced)
     // closing_balance > 0 = customer owes you (receivable)
     // closing_balance < 0 = you owe customer (over-payment / advance received)
-    const openingBal = Math.abs(parseFloat(customer[0].opening_balance) || 0);
+    // opening_balance stored as positive = customer owes you
+    // balance > 0 = customer still owes you (Receivable)
+    // balance < 0 = you owe customer (Advance received)
+    const openingBal = parseFloat(customer[0].opening_balance) || 0;
     let balance = openingBal;
     const ledger = allTx.map(tx => {
       const debit  = parseFloat(tx.debit)  || 0;
@@ -273,8 +276,11 @@ router.get('/suppliers/:id/ledger', auth, async (req, res) => {
     // Payments/Advances/Debit Notes = Cr (reduces what you owe) → credit side
     // closing_balance > 0 = you still owe supplier (payable)
     // closing_balance < 0 = supplier owes you (advance/over-payment)
-    const openingBal = Math.abs(parseFloat(supplier[0].opening_balance) || 0);
-    let balance = openingBal; // always treat opening as positive payable
+    // opening_balance stored as positive = you owe supplier
+    // balance > 0 = still owe supplier (Payable)
+    // balance < 0 = supplier owes you (Advance/Overpaid)
+    const openingBal = parseFloat(supplier[0].opening_balance) || 0;
+    let balance = openingBal;
     const transactions = all.map(t => {
       balance += (parseFloat(t.debit)||0) - (parseFloat(t.credit)||0);
       return { ...t, balance: parseFloat(balance.toFixed(2)) };
