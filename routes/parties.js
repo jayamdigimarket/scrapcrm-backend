@@ -52,8 +52,26 @@ router.post('/customers', auth, async (req, res) => {
 router.put('/customers/:id', auth, async (req, res) => {
   try {
     const d = req.body;
-    await db.query(`UPDATE customers SET name=?,business_name=?,gst_number=?,pan_number=?,phone=?,email=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,credit_limit=?,notes=? WHERE id=?`,
-      [d.name,d.business_name,d.gst_number,d.pan_number,d.phone,d.email,d.billing_address,d.shipping_address,d.city,d.state,d.pincode,d.payment_terms||'',d.credit_limit||0,d.notes||'',req.params.id]);
+    await db.query(
+      `UPDATE customers SET
+        name=?, business_name=?, gst_number=?, pan_number=?,
+        phone=?, whatsapp=?, email=?, contact_name=?,
+        billing_address=?, shipping_address=?,
+        city=?, state=?, pincode=?,
+        payment_terms=?, credit_limit=?, opening_balance=?,
+        product_capabilities=?, notes=?
+      WHERE id=?`,
+      [
+        d.name, d.business_name||'', d.gst_number||'', d.pan_number||'',
+        d.phone||'', d.whatsapp||d.phone||'', d.email||'', d.contact_name||'',
+        d.billing_address||'', d.shipping_address||'',
+        d.city||'', d.state||'', d.pincode||'',
+        d.payment_terms||'', d.credit_limit||0,
+        parseFloat(d.opening_balance)||0,
+        d.product_capabilities||'', d.notes||'',
+        req.params.id
+      ]
+    );
     res.json({ message: 'Updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -96,8 +114,14 @@ router.get('/customers/:id/ledger', auth, async (req, res) => {
     const allTx = [...invoices, ...payments, ...cns]
       .sort((a,b) => new Date(a.doc_date) - new Date(b.doc_date));
 
-    // FIX: use parseFloat to ensure numeric — prevents NaN from string arithmetic
-    let balance = parseFloat(customer[0].opening_balance) || 0;
+    // Customer ledger sign convention:
+    // opening_balance = amount customer OWES you at start (positive = receivable)
+    // Invoices = Dr (customer owes more)
+    // Payments/Credit Notes = Cr (customer paid / reduced)
+    // closing_balance > 0 = customer owes you (receivable)
+    // closing_balance < 0 = you owe customer (over-payment / advance received)
+    const openingBal = Math.abs(parseFloat(customer[0].opening_balance) || 0);
+    let balance = openingBal;
     const ledger = allTx.map(tx => {
       const debit  = parseFloat(tx.debit)  || 0;
       const credit = parseFloat(tx.credit) || 0;
@@ -110,9 +134,15 @@ router.get('/customers/:id/ledger', auth, async (req, res) => {
       };
     });
 
+    // Prepend opening balance row if non-zero
+    const ledgerRows = openingBal > 0
+      ? [{ type:'Opening Balance', doc_no:'—', doc_date: customer[0].created_at||new Date(), debit: openingBal, credit: 0, balance: openingBal, status:'—' }, ...ledger]
+      : ledger;
+
     res.json({
       customer: customer[0],
-      ledger,
+      ledger: ledgerRows,
+      opening_balance: openingBal,
       closing_balance: parseFloat(balance.toFixed(2)),
     });
   } catch (e) {
@@ -178,8 +208,27 @@ router.post('/suppliers', auth, async (req, res) => {
 router.put('/suppliers/:id', auth, async (req, res) => {
   try {
     const d = req.body;
-    await db.query(`UPDATE suppliers SET name=?,business_name=?,supplier_type=?,gst_registered=?,gst_number=?,phone=?,whatsapp=?,email=?,contact_name=?,address=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,bank_name=?,bank_account=?,ifsc_code=?,bank_branch=?,notes=? WHERE id=?`,
-      [d.name,d.business_name,d.supplier_type||'Other',d.gst_registered?1:0,d.gst_number||'',d.phone,d.whatsapp||d.phone||'',d.email||'',d.contact_name||'',d.billing_address||d.address||'',d.billing_address||d.address||'',d.shipping_address||'',d.city||'',d.state||'',d.pincode||'',d.payment_terms||'',d.bank_name||'',d.bank_account||'',d.ifsc_code||'',d.bank_branch||'',d.notes||'',req.params.id]);
+    await db.query(
+      `UPDATE suppliers SET
+        name=?, business_name=?, supplier_type=?, gst_registered=?, gst_number=?,
+        pan_number=?, phone=?, whatsapp=?, email=?, contact_name=?,
+        address=?, billing_address=?, shipping_address=?,
+        city=?, state=?, pincode=?,
+        payment_terms=?, opening_balance=?,
+        bank_name=?, bank_account=?, ifsc_code=?, bank_branch=?,
+        product_capabilities=?, notes=?
+      WHERE id=?`,
+      [
+        d.name, d.business_name||'', d.supplier_type||'Other', d.gst_registered?1:0, d.gst_number||'',
+        d.pan_number||'', d.phone||'', d.whatsapp||d.phone||'', d.email||'', d.contact_name||'',
+        d.billing_address||d.address||'', d.billing_address||d.address||'', d.shipping_address||'',
+        d.city||'', d.state||'', d.pincode||'',
+        d.payment_terms||'', parseFloat(d.opening_balance)||0,
+        d.bank_name||'', d.bank_account||'', d.ifsc_code||'', d.bank_branch||'',
+        d.product_capabilities||'', d.notes||'',
+        req.params.id
+      ]
+    );
     res.json({ message: 'Updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -218,18 +267,29 @@ router.get('/suppliers/:id/ledger', auth, async (req, res) => {
     const all = [...purchases, ...payments, ...advances, ...debits]
       .sort((a,b) => new Date(a.date) - new Date(b.date));
 
-    // Calculate running balance
-    let balance = parseFloat(supplier[0].opening_balance) || 0;
+    // Supplier ledger sign convention:
+    // opening_balance = amount you OWE the supplier at start (positive = payable)
+    // Purchases = Dr (increases what you owe)  → debit side
+    // Payments/Advances/Debit Notes = Cr (reduces what you owe) → credit side
+    // closing_balance > 0 = you still owe supplier (payable)
+    // closing_balance < 0 = supplier owes you (advance/over-payment)
+    const openingBal = Math.abs(parseFloat(supplier[0].opening_balance) || 0);
+    let balance = openingBal; // always treat opening as positive payable
     const transactions = all.map(t => {
       balance += (parseFloat(t.debit)||0) - (parseFloat(t.credit)||0);
-      return { ...t, balance: balance.toFixed(2) };
+      return { ...t, balance: parseFloat(balance.toFixed(2)) };
     });
+
+    // Prepend opening balance row if non-zero
+    const ledgerRows = openingBal > 0
+      ? [{ type:'Opening Balance', doc_no:'—', date: supplier[0].created_at||new Date(), debit: openingBal, credit: 0, balance: openingBal, payment_status:'—' }, ...transactions]
+      : transactions;
 
     res.json({
       supplier: supplier[0],
-      transactions,
-      opening_balance: supplier[0].opening_balance || 0,
-      closing_balance: balance,
+      transactions: ledgerRows,
+      opening_balance: openingBal,
+      closing_balance: parseFloat(balance.toFixed(2)),
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
