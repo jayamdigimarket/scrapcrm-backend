@@ -590,20 +590,6 @@ router.post('/grn', auth, async (req, res) => {
   }
 });
 
-// GET /purchases/:id - get single purchase with items
-router.get('/purchases/:id', auth, async (req, res) => {
-  try {
-    const [pur] = await db.query('SELECT * FROM purchases WHERE id=?', [req.params.id]);
-    if (!pur.length) return res.status(404).json({ error: 'Not found' });
-    const [items] = await db.query(`
-      SELECT pi.*, m.name as material_name, m.unit, m.hsn_code
-      FROM purchase_items pi
-      JOIN materials m ON m.id=pi.material_id
-      WHERE pi.purchase_id=?`, [req.params.id]);
-    res.json({ ...pur[0], items });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── WHATSAPP REMINDER (stub) ──────────────────────────────────────────────────
 router.post('/whatsapp/reminder/:id', auth, async (req, res) => {
   try {
@@ -712,16 +698,6 @@ router.post('/customer-pos', auth, async (req, res) => {
       }
     }
     res.json({ id: r.insertId, message: 'Customer PO recorded' });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-router.put('/customer-pos/:id', auth, async (req, res) => {
-  try {
-    const d = req.body;
-    await db.query(
-      'UPDATE customer_pos SET status=?,delivery_date=?,payment_terms=?,notes=? WHERE id=?',
-      [d.status||'Pending', d.delivery_date||null, d.payment_terms||'', d.notes||'', req.params.id]);
-    res.json({ message: 'Updated' });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -288,6 +288,42 @@ router.post('/delivery-challans', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── EDIT CREDIT NOTE ─────────────────────────────────────
+router.put('/credit-notes/:id', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    await db.query(
+      'UPDATE credit_notes SET cn_date=?,reason=?,their_dn_number=?,their_dn_date=?,their_dn_amount=? WHERE id=?',
+      [d.cn_date, d.reason||'', d.their_dn_number||'', d.their_dn_date||null, d.their_dn_amount||0, req.params.id]
+    );
+    res.json({ message: 'Credit note updated' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── EDIT DEBIT NOTE ──────────────────────────────────────
+router.put('/debit-notes/:id', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    await db.query(
+      'UPDATE debit_notes SET dn_date=?,reason=?,notes=? WHERE id=?',
+      [d.dn_date, d.reason||'', d.notes||'', req.params.id]
+    );
+    res.json({ message: 'Debit note updated' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── EDIT DELIVERY CHALLAN ────────────────────────────────
+router.put('/delivery-challans/:id', auth, async (req, res) => {
+  try {
+    const d = req.body;
+    await db.query(
+      'UPDATE delivery_challans SET challan_date=?,vehicle_number=?,status=?,notes=? WHERE id=?',
+      [d.challan_date, d.vehicle_number||'', d.status||'Draft', d.notes||'', req.params.id]
+    );
+    res.json({ message: 'Challan updated' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── EMAIL HELPER ──────────────────────────────────────────
 
 async function sendCNEmail(cnId, cnNo, branchId) {

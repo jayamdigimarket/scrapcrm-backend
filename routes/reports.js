@@ -215,7 +215,7 @@ router.get('/reports/balance', auth, async (req, res) => {
     const [gstPayable]  = await db.query(`
       SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) as out_gst FROM invoices WHERE branch_id=?`, [branch]);
     const [gstInput]    = await db.query(`
-      SELECT COALESCE(SUM(cgst_amount+sgst_amount),0) as in_gst FROM purchases WHERE branch_id=?
+      SELECT COALESCE(SUM(cgst_amount+sgst_amount+igst_amount),0) as in_gst FROM purchases WHERE branch_id=?
       AND supplier_id IN (SELECT id FROM suppliers WHERE gst_registered=1)`, [branch]);
     const [totalSales]  = await db.query('SELECT COALESCE(SUM(total_amount),0) as val FROM invoices WHERE branch_id=?', [branch]);
     const [totalPur]    = await db.query('SELECT COALESCE(SUM(total_amount),0) as val FROM purchases WHERE branch_id=?', [branch]);

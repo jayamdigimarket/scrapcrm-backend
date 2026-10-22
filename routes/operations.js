@@ -548,7 +548,7 @@ router.post('/recalculate-stock', auth, async (req, res) => {
       const [[cnSum]] = await conn.query(
         `SELECT COALESCE(SUM(ci.quantity),0) as total
          FROM credit_note_items ci
-         JOIN credit_notes cn ON cn.id=ci.credit_note_id
+         JOIN credit_notes cn ON cn.id=ci.cn_id
          WHERE ci.material_id=? AND cn.branch_id=?`,
         [mat.id, branch]).catch(() => [[{total:0}]]);
 
