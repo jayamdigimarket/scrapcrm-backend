@@ -34,8 +34,8 @@ app.use('/api',              require('./routes/parties'));
 app.use('/api',              require('./routes/transactions'));
 app.use('/api',              require('./routes/notes'));
 app.use('/api',              require('./routes/operations'));
-app.use('/api',              require('./routes/reports'));      // ← NEW
-app.use('/api',              require('./routes/notifications')); // ← NEW
+app.use('/api',              require('./routes/reports'));
+try { app.use('/api',        require('./routes/notifications')); } catch(e) { console.log('notifications route not found, skipping'); }
 
 // ── WhatsApp & Razorpay (optional) ───────────────────────
 try { app.use('/api/whatsapp', require('./routes/whatsapp')); } catch(e) {}

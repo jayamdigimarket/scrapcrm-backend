@@ -768,4 +768,30 @@ router.put('/indents/:id', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── DELETE PURCHASE ───────────────────────────────────────────────────────────
+
+router.delete('/purchases/:id', auth, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    // Restore stock for each purchase item
+    const [items] = await conn.query('SELECT * FROM purchase_items WHERE purchase_id=?', [req.params.id]);
+    for (const item of items) {
+      await conn.query(
+        'UPDATE materials SET current_stock=current_stock-? WHERE id=?',
+        [item.quantity, item.material_id]);
+      await conn.query(
+        'DELETE FROM stock_movements WHERE reference_type="purchase" AND reference_id=?',
+        [req.params.id]);
+    }
+    await conn.query('DELETE FROM purchase_items WHERE purchase_id=?', [req.params.id]);
+    await conn.query('DELETE FROM purchases WHERE id=?', [req.params.id]);
+    await conn.commit();
+    res.json({ message: 'Purchase deleted' });
+  } catch(e) {
+    await conn.rollback();
+    res.status(500).json({ error: e.message });
+  } finally { conn.release(); }
+});
+
 module.exports = router;
