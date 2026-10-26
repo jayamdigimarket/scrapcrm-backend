@@ -401,6 +401,15 @@ router.put('/purchase-orders/:id', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// DELETE /purchase-orders/:id  ← THIS WAS MISSING (caused "Route not found" alert)
+router.delete('/purchase-orders/:id', auth, async (req, res) => {
+  try {
+    await db.query('DELETE FROM purchase_order_items WHERE po_id=?', [req.params.id]);
+    await db.query('DELETE FROM purchase_orders WHERE id=?', [req.params.id]);
+    res.json({ message: 'Purchase Order deleted' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── PAYMENTS ─────────────────────────────────────────────
 
 router.post('/payments', auth, async (req, res) => {
