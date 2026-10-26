@@ -126,8 +126,8 @@ router.post('/suppliers/bulk', auth, async (req, res) => {
 router.put('/customers/:id', auth, async (req, res) => {
   try {
     const d = req.body;
-    await db.query(`UPDATE customers SET name=?,business_name=?,gst_number=?,pan_number=?,phone=?,email=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,credit_limit=?,notes=? WHERE id=?`,
-      [d.name,d.business_name,d.gst_number,d.pan_number,d.phone,d.email,d.billing_address,d.shipping_address,d.city,d.state,d.pincode,d.payment_terms||'',d.credit_limit||0,d.notes||'',req.params.id]);
+    await db.query(`UPDATE customers SET name=?,business_name=?,gst_number=?,pan_number=?,phone=?,email=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,credit_limit=?,notes=?,product_capabilities=?,whatsapp=?,contact_name=? WHERE id=?`,
+      [d.name,d.business_name,d.gst_number||'',d.pan_number||'',d.phone,d.email||'',d.billing_address||'',d.shipping_address||'',d.city||'',d.state||'',d.pincode||'',d.payment_terms||'',d.credit_limit||0,d.notes||'',d.product_capabilities||'',d.whatsapp||d.phone||'',d.contact_name||'',req.params.id]);
     res.json({ message: 'Updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -252,8 +252,8 @@ router.post('/suppliers', auth, async (req, res) => {
 router.put('/suppliers/:id', auth, async (req, res) => {
   try {
     const d = req.body;
-    await db.query(`UPDATE suppliers SET name=?,business_name=?,supplier_type=?,gst_registered=?,gst_number=?,phone=?,whatsapp=?,email=?,contact_name=?,address=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,bank_name=?,bank_account=?,ifsc_code=?,bank_branch=?,notes=? WHERE id=?`,
-      [d.name,d.business_name,d.supplier_type||'Other',d.gst_registered?1:0,d.gst_number||'',d.phone,d.whatsapp||d.phone||'',d.email||'',d.contact_name||'',d.billing_address||d.address||'',d.billing_address||d.address||'',d.shipping_address||'',d.city||'',d.state||'',d.pincode||'',d.payment_terms||'',d.bank_name||'',d.bank_account||'',d.ifsc_code||'',d.bank_branch||'',d.notes||'',req.params.id]);
+    await db.query(`UPDATE suppliers SET name=?,business_name=?,supplier_type=?,gst_registered=?,gst_number=?,phone=?,whatsapp=?,email=?,contact_name=?,address=?,billing_address=?,shipping_address=?,city=?,state=?,pincode=?,payment_terms=?,bank_name=?,bank_account=?,ifsc_code=?,bank_branch=?,notes=?,product_capabilities=? WHERE id=?`,
+      [d.name,d.business_name,d.supplier_type||'Other',d.gst_registered?1:0,d.gst_number||'',d.phone,d.whatsapp||d.phone||'',d.email||'',d.contact_name||'',d.billing_address||d.address||'',d.billing_address||d.address||'',d.shipping_address||'',d.city||'',d.state||'',d.pincode||'',d.payment_terms||'',d.bank_name||'',d.bank_account||'',d.ifsc_code||'',d.bank_branch||'',d.notes||'',d.product_capabilities||'',req.params.id]);
     res.json({ message: 'Updated' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
