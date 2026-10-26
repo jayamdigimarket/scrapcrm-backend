@@ -244,6 +244,10 @@ router.post('/purchases', auth, async (req, res) => {
         is_auto_generated: 1, linked_purchase_id: r.insertId,
         subtotal, cgst_amount: 0, sgst_amount: 0, igst_amount: 0,
         total_amount: subtotal, status: 'Received', created_by: req.user.id,
+        payment_terms: d.payment_terms || 7,
+        incoterms: d.incoterms || 'FOR Destination',
+        vehicle_number: d.vehicle_number || '',
+        driver_name: d.driver_name || '',
       }]);
       for (const item of d.items) {
         if (!item.material_id) continue;
