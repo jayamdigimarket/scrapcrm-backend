@@ -20,7 +20,7 @@ router.post('/login', async (req, res) => {
     await db.query('UPDATE users SET last_login=NOW() WHERE id=?', [user.id]);
     const token = jwt.sign(
       { id: user.id, role: user.role, branch_id: user.branch_id, name: user.name },
-      SECRET, { expiresIn: '24h' }
+      SECRET, { expiresIn: '30d' }
     );
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, branch_id: user.branch_id, branch_name: user.branch_name } });
   } catch (e) { res.status(500).json({ error: e.message }); }
