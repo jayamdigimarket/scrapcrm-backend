@@ -396,14 +396,15 @@ router.post('/purchase-orders', auth, async (req, res) => {
   }
 });
 
-// Update PO — status, payment_terms, incoterms, notes
+// Update PO — status, payment_terms, incoterms, delivery_date, notes
 router.put('/purchase-orders/:id', auth, async (req, res) => {
   try {
-    const { status, payment_terms, incoterms, notes } = req.body;
+    const { status, payment_terms, incoterms, delivery_date, notes } = req.body;
     const fields = [], values = [];
     if (status !== undefined)        { fields.push('status=?');        values.push(status); }
     if (payment_terms !== undefined) { fields.push('payment_terms=?'); values.push(payment_terms); }
     if (incoterms !== undefined)     { fields.push('incoterms=?');     values.push(incoterms); }
+    if (delivery_date !== undefined) { fields.push('delivery_date=?'); values.push(delivery_date || null); }
     if (notes !== undefined)         { fields.push('notes=?');         values.push(notes); }
     if (!fields.length) return res.json({ message: 'Nothing to update' });
     values.push(req.params.id);
